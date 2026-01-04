@@ -47,10 +47,10 @@ define('GROQ_PROMPT', "You are an assistant that sees an image of a test and pro
 // ================================================
 // ТАРИФЫ (в тенге)
 // ================================================
-define('PRICE_1H', 500);
-define('PRICE_3H', 1200);
-define('PRICE_12H', 3500);
-define('PRICE_24H', 6000);
+define('PRICE_1H', 100);
+define('PRICE_3H', 200);
+define('PRICE_12H', 300);
+define('PRICE_24H', 4000);
 
 // Соответствие часов и цен
 $PRICES = [
@@ -70,7 +70,7 @@ define('ADMIN_PASSWORD', 'alibali2436');
 $ADMIN_ALLOWED_IPS = [];
 
 // Секретный ключ для подписи запросов
-define('API_SECRET_KEY', 'your_random_secret_key_change_this');
+define('API_SECRET_KEY', 'admin1234567890securekey');
 
 // Rate limiting
 define('MAX_REQUESTS_PER_MINUTE', 10);

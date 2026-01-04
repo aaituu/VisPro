@@ -1,12 +1,13 @@
 <?php
 /**
- * QuickVision Telegram Bot Webhook
- * Основной бот для регистрации, оплаты и управления
+ * QuickVision Telegram Bot - Full Implementation
+ * Регистрация, оплата через Kaspi QR, выдача кодов
  */
 
 define('API_ACCESS', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db_connect.php';
+require_once __DIR__ . '/functions.php';
 
 // Получаем обновление от Telegram
 $content = file_get_contents('php://input');
@@ -16,9 +17,13 @@ if (!$update) {
     exit('No update');
 }
 
-log_message('Telegram webhook received', 'info', ['update_id' => $update['update_id'] ?? 'unknown']);
+log_message('Telegram webhook received', 'info', [
+    'update_id' => $update['update_id'] ?? 'unknown'
+]);
 
-// Обработка сообщения
+// ==============================================
+// ОБРАБОТКА СООБЩЕНИЙ
+// ==============================================
 if (isset($update['message'])) {
     $message = $update['message'];
     $chat_id = $message['chat']['id'];
@@ -57,12 +62,13 @@ if (isset($update['message'])) {
     if (strpos($text, '/') === 0) {
         handleCommand($text, $chat_id, $user, $db);
     } else {
-        // Обработка обычного текста (например, ввод промокода)
         handleText($text, $chat_id, $user, $db);
     }
 }
 
-// Обработка callback query (кнопки)
+// ==============================================
+// ОБРАБОТКА CALLBACK (КНОПКИ)
+// ==============================================
 if (isset($update['callback_query'])) {
     $callback = $update['callback_query'];
     $chat_id = $callback['message']['chat']['id'];
@@ -74,15 +80,15 @@ if (isset($update['callback_query'])) {
 
 exit('OK');
 
-// ================================================
-// ОБРАБОТЧИКИ КОМАНД
-// ================================================
+// ==============================================
+// ФУНКЦИИ КОМАНД
+// ==============================================
 
 /**
  * Обработка команд бота
  */
 function handleCommand($text, $chat_id, $user, $db) {
-    $command = strtolower(explode(' ', $text)[0]);
+    $command = strtolower(trim(explode(' ', $text)[0]));
     
     switch ($command) {
         case '/start':
@@ -97,6 +103,11 @@ function handleCommand($text, $chat_id, $user, $db) {
             commandStatus($chat_id, $user, $db);
             break;
             
+        case '/code':
+        case '/mycode':
+            commandGetCode($chat_id, $user, $db);
+            break;
+            
         case '/help':
             commandHelp($chat_id);
             break;
@@ -106,7 +117,7 @@ function handleCommand($text, $chat_id, $user, $db) {
             break;
             
         default:
-            sendMessage($chat_id, "Неизвестная команда. Используйте /help для списка команд.");
+            sendMessage($chat_id, "❓ Неизвестная команда\n\nИспользуйте /help для списка команд");
     }
 }
 
@@ -116,18 +127,20 @@ function handleCommand($text, $chat_id, $user, $db) {
 function commandStart($chat_id, $user) {
     $name = $user['first_name'] ?: 'пользователь';
     
-    $message = "👋 Привет, {$name}!\n\n";
-    $message .= "🚀 *QuickVision* - ваш AI ассистент для тестов!\n\n";
-    $message .= "📸 Как это работает:\n";
-    $message .= "1️⃣ Купите подписку /buy\n";
-    $message .= "2️⃣ Получите код активации\n";
-    $message .= "3️⃣ Скачайте приложение\n";
-    $message .= "4️⃣ Нажимайте Ctrl+Shift+X и получайте ответы!\n\n";
-    $message .= "💡 Команды:\n";
-    $message .= "/buy - Купить подписку\n";
-    $message .= "/status - Проверить статус\n";
-    $message .= "/help - Помощь\n";
-    $message .= "/support - Поддержка\n";
+    $message = "👋 Привет, *{$name}*!\n\n";
+    $message .= "🚀 *QuickVision* - твой AI ассистент для тестов!\n\n";
+    $message .= "📸 *Как это работает:*\n";
+    $message .= "1️⃣ Купи подписку — /buy\n";
+    $message .= "2️⃣ Получи код активации\n";
+    $message .= "3️⃣ Скачай приложение\n";
+    $message .= "4️⃣ Запусти и введи код\n";
+    $message .= "5️⃣ Нажимай Ctrl+Shift+X и получай ответы!\n\n";
+    $message .= "💡 *Команды:*\n";
+    $message .= "/buy — Купить подписку\n";
+    $message .= "/status — Мой статус\n";
+    $message .= "/code — Показать код\n";
+    $message .= "/help — Помощь\n";
+    $message .= "/support — Поддержка\n";
     
     sendMessage($chat_id, $message);
 }
@@ -138,24 +151,26 @@ function commandStart($chat_id, $user) {
 function commandBuy($chat_id, $user) {
     global $PRICES;
     
-    $message = "💳 *Выберите тариф:*\n\n";
+    $message = "💳 *Выбери тариф:*\n\n";
     
     $keyboard = [
         'inline_keyboard' => []
     ];
     
     foreach ($PRICES as $hours => $price) {
-        $message .= "⏰ *{$hours} " . declension($hours, ['час', 'часа', 'часов']) . "* - {$price} ₸\n";
+        $hours_text = declension($hours, ['час', 'часа', 'часов']);
+        $message .= "⏰ *{$hours} {$hours_text}* — {$price} ₸\n";
         
         $keyboard['inline_keyboard'][] = [
             [
-                'text' => "{$hours}ч - {$price}₸",
+                'text' => "🕐 {$hours}ч — {$price}₸",
                 'callback_data' => "buy:{$hours}"
             ]
         ];
     }
     
-    $message .= "\n💵 Оплата через Kaspi QR";
+    $message .= "\n💵 Оплата через Kaspi QR\n";
+    $message .= "⚡️ Код активации приходит сразу после оплаты";
     
     sendMessage($chat_id, $message, $keyboard);
 }
@@ -167,9 +182,9 @@ function commandStatus($chat_id, $user, $db) {
     $is_active = $db->isSubscriptionActive($user['id']);
     $stats = $db->getUserStats($user['id']);
     
-    $message = "📊 *Ваш статус:*\n\n";
-    $message .= "👤 ID: {$user['id']}\n";
-    $message .= "📱 Username: @" . ($user['username'] ?: 'не указан') . "\n\n";
+    $message = "📊 *Твой статус:*\n\n";
+    $message .= "👤 ID: `{$user['id']}`\n";
+    $message .= "📱 Username: " . ($user['username'] ? "@{$user['username']}" : '_не указан_') . "\n\n";
     
     if ($is_active) {
         $expires = new DateTime($user['expires_at']);
@@ -177,8 +192,20 @@ function commandStatus($chat_id, $user, $db) {
         $diff = $now->diff($expires);
         
         $message .= "✅ *Подписка активна*\n";
-        $message .= "⏰ До: " . $expires->format('d.m.Y H:i') . "\n";
-        $message .= "⏳ Осталось: {$diff->days} дн. {$diff->h} ч. {$diff->i} мин.\n\n";
+        $message .= "📅 До: `" . $expires->format('d.m.Y H:i') . "`\n";
+        
+        $time_parts = [];
+        if ($diff->d > 0) {
+            $time_parts[] = $diff->d . ' ' . declension($diff->d, ['день', 'дня', 'дней']);
+        }
+        if ($diff->h > 0) {
+            $time_parts[] = $diff->h . ' ' . declension($diff->h, ['час', 'часа', 'часов']);
+        }
+        if (empty($time_parts) && $diff->i > 0) {
+            $time_parts[] = $diff->i . ' ' . declension($diff->i, ['минута', 'минуты', 'минут']);
+        }
+        
+        $message .= "⏳ Осталось: *" . implode(' ', $time_parts) . "*\n\n";
     } else {
         $message .= "❌ *Подписка не активна*\n\n";
     }
@@ -190,9 +217,66 @@ function commandStatus($chat_id, $user, $db) {
     
     if (!$is_active) {
         $message .= "\n➡️ Продлить: /buy";
+    } else {
+        $message .= "\n📲 Получить код: /code";
     }
     
     sendMessage($chat_id, $message);
+}
+
+/**
+ * /code - Показать код активации
+ */
+function commandGetCode($chat_id, $user, $db) {
+    global $pdo;
+    
+    // Ищем неиспользованный код
+    $stmt = $pdo->prepare("
+        SELECT code, created_at 
+        FROM activations 
+        WHERE user_id = ? AND is_used = 0 
+        ORDER BY created_at DESC 
+        LIMIT 1
+    ");
+    $stmt->execute([$user['id']]);
+    $activation = $stmt->fetch();
+    
+    if ($activation) {
+        $code = $activation['code'];
+        $created = date('d.m.Y H:i', strtotime($activation['created_at']));
+        
+        $message = "🔑 *Твой код активации:*\n\n";
+        $message .= "`{$code}`\n\n";
+        $message .= "📅 Создан: {$created}\n\n";
+        $message .= "📥 [Скачать приложение](" . SITE_URL . "/download)\n\n";
+        $message .= "*Как использовать:*\n";
+        $message .= "1. Скачай приложение\n";
+        $message .= "2. Запусти и введи этот код\n";
+        $message .= "3. Нажимай Ctrl+Shift+X\n\n";
+        $message .= "⚠️ Не передавай код другим!";
+        
+        sendMessage($chat_id, $message);
+    } else {
+        // Нет кода - создаем новый
+        try {
+            $code = generateUniqueActivationCode($pdo);
+            $db->createActivation($user['id'], $code);
+            
+            $message = "🔑 *Твой новый код активации:*\n\n";
+            $message .= "`{$code}`\n\n";
+            $message .= "📥 [Скачать приложение](" . SITE_URL . "/download)\n\n";
+            $message .= "Следуй инструкциям для активации!";
+            
+            sendMessage($chat_id, $message);
+            
+        } catch (Exception $e) {
+            sendMessage($chat_id, "❌ Ошибка создания кода. Попробуй позже или пиши /support");
+            log_message('Code generation failed', 'error', [
+                'user_id' => $user['id'],
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }
 
 /**
@@ -201,19 +285,27 @@ function commandStatus($chat_id, $user, $db) {
 function commandHelp($chat_id) {
     $message = "ℹ️ *Справка QuickVision*\n\n";
     $message .= "*Как пользоваться:*\n";
-    $message .= "1. Купите подписку через /buy\n";
-    $message .= "2. Получите код активации и ссылку на скачивание\n";
-    $message .= "3. Запустите программу и введите код\n";
-    $message .= "4. Нажмите Ctrl+Shift+X на любом экране теста\n";
-    $message .= "5. Получите ответы в этом чате!\n\n";
+    $message .= "1. Купи подписку через /buy\n";
+    $message .= "2. Оплати через Kaspi QR\n";
+    $message .= "3. Получи код активации\n";
+    $message .= "4. Скачай и запусти приложение\n";
+    $message .= "5. Введи код активации\n";
+    $message .= "6. Нажимай Ctrl+Shift+X на тесте\n";
+    $message .= "7. Получай ответы в этом чате!\n\n";
+    
     $message .= "*Команды:*\n";
-    $message .= "/buy - Купить/продлить подписку\n";
-    $message .= "/status - Проверить статус\n";
-    $message .= "/support - Связаться с поддержкой\n\n";
-    $message .= "*Технические требования:*\n";
+    $message .= "/buy — Купить подписку\n";
+    $message .= "/status — Проверить статус\n";
+    $message .= "/code — Показать код\n";
+    $message .= "/support — Связаться с поддержкой\n\n";
+    
+    $message .= "*Системные требования:*\n";
     $message .= "• Windows 10/11, macOS, Linux\n";
     $message .= "• Интернет соединение\n";
-    $message .= "• Python 3.8+ (если запускаете из исходников)\n";
+    $message .= "• Python 3.8+ (автоматически в EXE)\n\n";
+    
+    $message .= "*Вопросы?*\n";
+    $message .= "Пиши /support";
     
     sendMessage($chat_id, $message);
 }
@@ -222,35 +314,34 @@ function commandHelp($chat_id) {
  * /support - Поддержка
  */
 function commandSupport($chat_id) {
-    $message = "🆘 *Поддержка*\n\n";
-    $message .= "По всем вопросам:\n";
+    $message = "🆘 *Поддержка QuickVision*\n\n";
     $message .= "📧 Email: support@tamada-games.lol\n";
     $message .= "💬 Telegram: @tamada_support\n\n";
-    $message .= "⏰ Время работы: 9:00 - 21:00 (GMT+6)\n\n";
-    $message .= "Опишите вашу проблему, и мы поможем!";
+    $message .= "⏰ Работаем: 9:00 - 21:00 (GMT+6)\n\n";
+    $message .= "Опиши свою проблему и мы поможем!";
     
     sendMessage($chat_id, $message);
 }
 
 /**
- * Обработка текста (не команды)
+ * Обработка обычного текста
  */
 function handleText($text, $chat_id, $user, $db) {
-    // Можно добавить логику обработки промокодов и т.д.
-    sendMessage($chat_id, "Используйте команды для управления: /help");
+    // Можно добавить обработку промокодов
+    sendMessage($chat_id, "Используй команды для управления.\nСписок команд: /help");
 }
 
-// ================================================
-// ОБРАБОТКА CALLBACK КНОПОК
-// ================================================
+// ==============================================
+// ОБРАБОТКА CALLBACK (КНОПКИ)
+// ==============================================
 
 /**
- * Обработка нажатий на кнопки
+ * Обработка нажатий на inline кнопки
  */
 function handleCallback($data, $chat_id, $callback_id, $db) {
-    global $PRICES;
+    global $PRICES, $pdo;
     
-    // Ответ на callback (убирает "часики" на кнопке)
+    // Ответ на callback
     answerCallback($callback_id);
     
     $parts = explode(':', $data);
@@ -267,28 +358,33 @@ function handleCallback($data, $chat_id, $callback_id, $db) {
         
         $user = $db->getUserByChatId($chat_id);
         
-        // Создаем платеж
+        // Создаем платеж в БД
         $payment_id = $db->createPayment($user['id'], $price, $hours, 'kaspi');
         
-        // Генерируем Kaspi QR (здесь нужна интеграция с Kaspi API)
-        // Для примера просто показываем инструкцию
+        // Генерируем Kaspi QR
+        $kaspi_qr_data = generateKaspiQR($payment_id, $price, $user);
         
-        $message = "💳 *Оплата {$hours}ч - {$price}₸*\n\n";
-        $message .= "📱 *Инструкция:*\n";
-        $message .= "1. Откройте Kaspi.kz\n";
-        $message .= "2. Перейдите в 'Платежи'\n";
-        $message .= "3. Выберите 'По QR коду'\n";
-        $message .= "4. Отсканируйте QR код ниже\n";
-        $message .= "5. Подтвердите оплату\n\n";
-        $message .= "💰 Сумма: *{$price} ₸*\n";
-        $message .= "🆔 ID платежа: #{$payment_id}\n\n";
-        $message .= "После оплаты код активации придет автоматически!\n\n";
-        $message .= "⚠️ Если оплата не прошла, напишите /support";
+        $hours_text = declension($hours, ['час', 'часа', 'часов']);
         
+        $message = "💳 *Оплата: {$hours} {$hours_text}*\n";
+        $message .= "💰 Сумма: *{$price} ₸*\n\n";
+        $message .= "📱 *Как оплатить:*\n";
+        $message .= "1. Открой Kaspi.kz\n";
+        $message .= "2. Выбери 'Платежи'\n";
+        $message .= "3. Нажми 'По QR-коду'\n";
+        $message .= "4. Отсканируй QR ниже\n";
+        $message .= "5. Подтверди оплату\n\n";
+        $message .= "🆔 Платёж: `#{$payment_id}`\n\n";
+        $message .= "⚡️ После оплаты код активации придёт автоматически!\n\n";
+        $message .= "❓ Проблемы с оплатой? /support";
+        
+        // Отправляем сообщение
         sendMessage($chat_id, $message);
         
-        // TODO: Здесь должна быть генерация реального QR кода Kaspi
-        // И отправка изображения через sendPhoto
+        // Отправляем QR код как фото
+        if ($kaspi_qr_data['qr_image_path']) {
+            sendPhoto($chat_id, $kaspi_qr_data['qr_image_path'], "Отсканируй этот QR в Kaspi.kz");
+        }
         
         // Логируем
         $db->logActivity($user['id'], 'payment_initiated', [
@@ -299,9 +395,77 @@ function handleCallback($data, $chat_id, $callback_id, $db) {
     }
 }
 
-// ================================================
+// ==============================================
+// KASPI QR ГЕНЕРАЦИЯ
+// ==============================================
+
+/**
+ * Генерация Kaspi QR кода
+ * 
+ * ВАЖНО: Это упрощенная версия!
+ * Для реальной интеграции нужен Kaspi API
+ */
+function generateKaspiQR($payment_id, $amount, $user) {
+    // ========================================
+    // ЗАМЕНИТЕ ЭТО НА РЕАЛЬНЫЙ KASPI API
+    // ========================================
+    
+    // Временная реализация - генерация простого QR
+    $qr_data = [
+        'merchant_id' => 'YOUR_KASPI_MERCHANT_ID', // ← ЗАМЕНИТЬ
+        'amount' => $amount,
+        'currency' => 'KZT',
+        'order_id' => $payment_id,
+        'description' => "QuickVision подписка",
+        'callback_url' => SITE_URL . '/api/payment_callback.php'
+    ];
+    
+    // Генерируем QR код (используйте библиотеку или API)
+    $qr_image_path = generateQRCodeImage($qr_data, $payment_id);
+    
+    return [
+        'qr_data' => $qr_data,
+        'qr_image_path' => $qr_image_path
+    ];
+}
+
+/**
+ * Генерация изображения QR кода
+ */
+function generateQRCodeImage($data, $payment_id) {
+    // Используйте библиотеку для генерации QR
+    // Например: phpqrcode или API вроде goqr.me
+    
+    $qr_text = json_encode($data);
+    
+    // Пример с использованием внешнего API
+    $qr_url = "https://api.qrserver.com/v1/create-qr-code/?" . http_build_query([
+        'size' => '300x300',
+        'data' => $qr_text
+    ]);
+    
+    // Сохраняем QR во временную папку
+    $temp_path = TEMP_PATH . "/qr_{$payment_id}.png";
+    
+    try {
+        $qr_image = file_get_contents($qr_url);
+        if ($qr_image) {
+            file_put_contents($temp_path, $qr_image);
+            return $temp_path;
+        }
+    } catch (Exception $e) {
+        log_message('QR generation failed', 'error', [
+            'payment_id' => $payment_id,
+            'error' => $e->getMessage()
+        ]);
+    }
+    
+    return null;
+}
+
+// ==============================================
 // TELEGRAM API ФУНКЦИИ
-// ================================================
+// ==============================================
 
 /**
  * Отправка сообщения
@@ -312,7 +476,8 @@ function sendMessage($chat_id, $text, $keyboard = null) {
     $payload = [
         'chat_id' => $chat_id,
         'text' => $text,
-        'parse_mode' => 'Markdown'
+        'parse_mode' => 'Markdown',
+        'disable_web_page_preview' => true
     ];
     
     if ($keyboard) {
@@ -325,7 +490,36 @@ function sendMessage($chat_id, $text, $keyboard = null) {
         CURLOPT_POST => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
         CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_TIMEOUT => 5
+        CURLOPT_TIMEOUT => 10
+    ]);
+    
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    return $response;
+}
+
+/**
+ * Отправка фото
+ */
+function sendPhoto($chat_id, $photo_path, $caption = null) {
+    $url = "https://api.telegram.org/bot" . MAIN_BOT_TOKEN . "/sendPhoto";
+    
+    $post_fields = [
+        'chat_id' => $chat_id,
+        'photo' => new CURLFile($photo_path)
+    ];
+    
+    if ($caption) {
+        $post_fields['caption'] = $caption;
+    }
+    
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $post_fields,
+        CURLOPT_TIMEOUT => 15
     ]);
     
     $response = curl_exec($ch);
@@ -337,10 +531,14 @@ function sendMessage($chat_id, $text, $keyboard = null) {
 /**
  * Ответ на callback query
  */
-function answerCallback($callback_id, $text = null) {
+function answerCallback($callback_id, $text = null, $show_alert = false) {
     $url = "https://api.telegram.org/bot" . MAIN_BOT_TOKEN . "/answerCallbackQuery";
     
-    $payload = ['callback_query_id' => $callback_id];
+    $payload = [
+        'callback_query_id' => $callback_id,
+        'show_alert' => $show_alert
+    ];
+    
     if ($text) {
         $payload['text'] = $text;
     }
@@ -356,12 +554,4 @@ function answerCallback($callback_id, $text = null) {
     
     curl_exec($ch);
     curl_close($ch);
-}
-
-/**
- * Склонение слов
- */
-function declension($number, $forms) {
-    $cases = [2, 0, 1, 1, 1, 2];
-    return $forms[($number % 100 > 4 && $number % 100 < 20) ? 2 : $cases[min($number % 10, 5)]];
 }
